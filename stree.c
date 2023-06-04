@@ -1,174 +1,146 @@
-#define _XOPEN_SOURCE 600
-#include <ftw.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <dirent.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <pwd.h>
 #include <grp.h>
-#include <dirent.h>
 
-typedef struct node
-{
-    int level, last, indent;
-    int *dirs;
-    struct node *prev;
-    struct node *next;
-} node;
+typedef struct counter {
+  size_t dirs;
+  size_t files;
+} counter_t;
 
-node *head;
-node *curr;
-char *ENTRY = "├── ";
-char *LAST = "└── ";
-int n_files = 0, n_dirs = 0, prefix = 0, max_lvl = 0;
-char *perms[] = {"---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"};
+typedef struct entry {
+  char *name;
+  int is_dir;
+  struct entry *next;
+} entry_t;
 
-static int list(const char *name, const struct stat *status, int type, struct FTW *ftwb)
-{
-    if (type == FTW_NS)
-        return 0;
-
-    if (type == FTW_F)
-    {
-        curr = curr->next;
-        struct passwd *pwd;
-        struct group *grp;
-        pwd = getpwuid(status->st_uid);
-        grp = getgrgid(status->st_gid);
-        char a[4];
-        sprintf(a, "%3o", status->st_mode & 0777);
-        ++n_files;
-        if (curr->next == NULL)
-        {
-            curr->last = 1;
-        }
-        else
-        {
-            node *ptr = curr->next;
-            while (ptr != NULL && ptr->next != NULL && ptr->level > curr->level)
-            {
-                if (ptr->next->next == NULL)
-                    curr->last = 1;
-
-                ptr = ptr->next;
-            }
-            if (ptr->level < curr->level)
-            {
-                curr->last = 1;
-            }
-        }
-        for (int i = 0; i < ftwb->level - 1; ++i)
-        {
-            (curr->dirs[i + 1])? printf("    ") : printf("│   ");
-        }
-        // for (int i = ftwb->level - curr->indent; i < ftwb->level; ++i)
-        // {
-        //     printf("    ");
-        // }
-        printf("%s[-%s%s%s %s %s %*ld]  %s\n", curr->last ? LAST : ENTRY, perms[a[0] - '0'], perms[a[1] - '0'], perms[a[2] - '0'], pwd->pw_name, grp->gr_name, 11, status->st_size, name + ftwb->base);
-    }
-
-    if (type == FTW_D && strcmp(".", name) != 0 && strcmp("", name) != 0 && strcmp("..", name) != 0 && ftwb->level > 0)
-    {
-        curr = curr->next;
-
-        struct passwd *pwd;
-        struct group *grp;
-        pwd = getpwuid(status->st_uid);
-        grp = getgrgid(status->st_gid);
-        char a[4];
-        sprintf(a, "%3o", status->st_mode & 0777);
-        ++n_dirs;
-        if (curr->next == NULL)
-        {
-            curr->last = 1;
-        }
-        else
-        {
-            node *ptr = curr->next;
-            while ( ptr != NULL && ptr->next != NULL && ptr->level > curr->level)
-            {
-                if (ptr->next->next == NULL && ptr->next->level > curr->level)
-                {
-                    curr->last = 1;
-                }
-                ptr = ptr->next;
-            }
-            if (ptr->level < curr->level)
-            {
-                curr->last = 1;
-            }
-        }
-        if (curr->last && curr->next != NULL)
-        {
-            node *ptr = curr->next;
-            while(ptr != NULL && ptr->level > curr->level){
-                ptr->dirs[curr->level] = 1;
-                ptr = ptr->next;
-            }
-        }
-        for (int i = 0; i < ftwb->level - 1; ++i)
-        {
-            (curr->dirs[i + 1])? printf("    ") : printf("│   ");
-        }
-        // for (int i = ftwb->level - curr->indent; i < ftwb->level; ++i)
-        // {
-        //     printf("    ");
-        // }
-        printf("%s[d%s%s%s %s %s %*ld]  %s\n", curr->last ? LAST : ENTRY, perms[a[0] - '0'], perms[a[1] - '0'], perms[a[2] - '0'], pwd->pw_name, grp->gr_name, 11, status->st_size, name + ftwb->base);
-        
-    }
-
-    return 0;
+void print_permissions(mode_t mode) {
+  printf ("[");
+  putchar((mode & S_IFDIR) ? 'd' : '-');
+  putchar((mode & S_IRUSR) ? 'r' : '-');
+  putchar((mode & S_IWUSR) ? 'w' : '-');
+  putchar((mode & S_IXUSR) ? 'x' : '-');
+  putchar((mode & S_IRGRP) ? 'r' : '-');
+  putchar((mode & S_IWGRP) ? 'w' : '-');
+  putchar((mode & S_IXGRP) ? 'x' : '-');
+  putchar((mode & S_IROTH) ? 'r' : '-');
+  putchar((mode & S_IWOTH) ? 'w' : '-');
+  putchar((mode & S_IXOTH) ? 'x' : '-');
 }
 
-static int pre_list(const char *name, const struct stat *status, int type, struct FTW *ftwb)
-{
-    if (type == FTW_NS)
-        return 0;
-    if ((type == FTW_D && strcmp(".", name) != 0 && strcmp("", name) != 0 && strcmp("..", name) != 0) || type == FTW_F)
-    {
-        curr->next = (node *)malloc(sizeof(node));
-        curr->next->dirs = (int *)calloc(ftwb->level, sizeof(int));
-        curr->next->level = ftwb->level;
-        curr->next->last = curr->next->indent = 0;
-        curr->next->prev = curr;
-        curr = curr->next;
-        curr->next = NULL;
-        if (ftwb->level > max_lvl)
-            max_lvl = ftwb->level;
-    }
-    return 0;
+void print_user_group(uid_t uid, gid_t gid) {
+  struct passwd *pw = getpwuid(uid);
+  struct group *gr = getgrgid(gid);
+  if (pw != NULL && gr != NULL) {
+    printf("  %s  %s", pw->pw_name, gr->gr_name);
+  }
 }
 
-int main(int argc, char *argv[])
-{
-    head = (node *)malloc(sizeof(node));
-    head->level = head->last = head->indent = 0;
-    curr = head;
+int walk(const char* directory, const char* prefix, counter_t *counter) {
+  entry_t *head = NULL, *current, *iter;
+  size_t size = 0, index;
 
-    if (argc == 1)
-    {
-        nftw(".", pre_list, 1, 0);
-        curr = head;
-        nftw(".", list, 1, 0);
+  struct dirent *file_dirent;
+  DIR *dir_handle;
+
+  char *full_path, *segment, *pointer, *next_prefix;
+
+  dir_handle = opendir(directory);
+  if (!dir_handle) {
+    fprintf(stderr, "Cannot open directory \"%s\"\n", directory);
+    return -1;
+  }
+
+  counter->dirs++;
+
+  while ((file_dirent = readdir(dir_handle)) != NULL) {
+    if (file_dirent->d_name[0] == '.') {
+      continue;
     }
-    else
-    {
-        prefix = strlen(argv[1]);
-        nftw(argv[1], pre_list, 1, 0);
-        curr = head;
-        nftw(argv[1], list, 1, 0);
+
+    current = malloc(sizeof(entry_t));
+    current->name = strcpy(malloc(strlen(file_dirent->d_name) + 1), file_dirent->d_name);
+    current->is_dir = file_dirent->d_type == DT_DIR;
+    current->next = NULL;
+
+    if (head == NULL) {
+      head = current;
+    } else if (strcmp(current->name, head->name) < 0) {
+      current->next = head;
+      head = current;
+    } else {
+      for (iter = head; iter->next && strcmp(current->name, iter->next->name) > 0; iter = iter->next);
+
+      current->next = iter->next;
+      iter->next = current;
     }
-    while (head != NULL && head->next != NULL)
-    {
-        curr = head;
-        head = head->next;
-        free(curr->dirs);
-        free(curr);
-    }
-    free(head->dirs);
-    free(head);
-    printf("\n%d directories, %d files\n", n_dirs, n_files);
+
+    size++;
+  }
+
+  closedir(dir_handle);
+  if (!head) {
     return 0;
+  }
+
+  for (index = 0; index < size; index++) {
+    if (index == size - 1) {
+      pointer = "└── ";
+      segment = "    ";
+    } else {
+      pointer = "├── ";
+      segment = "│   ";
+    }
+
+    printf("%s%s", prefix, pointer);
+
+    struct stat file_stat;
+    char* full_path_name = malloc(strlen(directory) + strlen(head->name) + 2);
+    sprintf(full_path_name, "%s/%s", directory, head->name);
+
+    if (lstat(full_path_name, &file_stat) != -1) {
+    
+      print_permissions(file_stat.st_mode);
+      printf(" ");
+      print_user_group(file_stat.st_uid, file_stat.st_gid);
+      printf(" %8ld]", (long) file_stat.st_size);
+      printf("  %s\n", head->name);
+
+      if (head->is_dir) {
+        next_prefix = malloc(strlen(prefix) + strlen(segment) + 1);
+        sprintf(next_prefix, "%s%s", prefix, segment);
+
+        walk(full_path_name, next_prefix, counter);
+        free(next_prefix);
+      } else {
+        counter->files++;
+      }
+    }
+
+    free(full_path_name);
+
+    current = head;
+    head = head->next;
+
+    free(current->name);
+    free(current);
+  }
+
+  return 0;
+}
+
+int main(int argc, char *argv[]) {
+  char* directory = argc > 1 ? argv[1] : ".";
+  printf("%s\n", directory);
+
+  counter_t counter = {0, 0};
+  walk(directory, "", &counter);
+
+  printf("\n%zu directories, %zu files\n",
+    counter.dirs ? counter.dirs - 1 : 0, counter.files);
+  return 0;
 }
