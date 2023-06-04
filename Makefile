@@ -1,7 +1,16 @@
-all: stree
+CC=gcc
+FLAGS=-Wall -g
+
+all: stree ftw1 ftw2
+
+ftw1: ftw1.c
+	$(CC) $(FLAGS) $^ -o $@
+
+ftw2: ftw2.c
+	$(CC) $(FLAGS) $^ -o $@
 
 stree: stree.c
-	gcc stree.c -o stree
+	$(CC) $(FLAGS) $^ -o $@
 
 clean:
-	rm stree
+	rm stree ftw1 ftw2
