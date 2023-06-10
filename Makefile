@@ -13,4 +13,4 @@ stree: stree.c
 	$(CC) $(FLAGS) $^ -o $@
 
 clean:
-	rm stree ftw1 ftw2  
+	rm -rf stree ftw1 ftw2
