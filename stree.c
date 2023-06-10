@@ -7,19 +7,23 @@
 #include <pwd.h>
 #include <grp.h>
 
-typedef struct counter {
+
+// usefull links: https://github.com/kddnewton/tree/blob/main/tree.c
+
+typedef struct {
   size_t dirs;
   size_t files;
-} counter_t;
+} Counter;
 
-typedef struct entry {
+typedef struct Entry {
   char *name;
-  int is_dir;
-  struct entry *next;
-} entry_t;
+  int isDir;
+  struct Entry *next;
+} Entry;
 
-void print_permissions(mode_t mode) {
-  printf ("[");
+// Function to print the file permissions
+void printPermissions(mode_t mode) {
+  printf("[");
   putchar((mode & S_IFDIR) ? 'd' : '-');
   putchar((mode & S_IRUSR) ? 'r' : '-');
   putchar((mode & S_IWUSR) ? 'w' : '-');
@@ -32,49 +36,54 @@ void print_permissions(mode_t mode) {
   putchar((mode & S_IXOTH) ? 'x' : '-');
 }
 
-void print_user_group(uid_t uid, gid_t gid) {
+// Function to print the user and group information
+void printUserGroup(uid_t uid, gid_t gid) {
   struct passwd *pw = getpwuid(uid);
   struct group *gr = getgrgid(gid);
   if (pw != NULL && gr != NULL) {
-    printf("  %s  %s", pw->pw_name, gr->gr_name);
+    printf(" %s  %s", pw->pw_name, gr->gr_name);
   }
 }
 
-int walk(const char* directory, const char* prefix, counter_t *counter) {
-  entry_t *head = NULL, *current, *iter;
-  size_t size = 0, index;
+// Function to traverse files and directories recursively
+int traverseFiles(const char* directory, const char* prefix, Counter *counter) {
+  Entry *head = NULL, *current, *iter;
+  size_t size = 0;
 
-  struct dirent *file_dirent;
-  DIR *dir_handle;
+  struct dirent *fileDir;
+  DIR *dir;
 
-  char *full_path, *segment, *pointer, *next_prefix;
+  char *segment, *pointer, *nextPrefix;
 
-  dir_handle = opendir(directory);
-  if (!dir_handle) {
+  dir = opendir(directory);
+  if (!dir) {
     fprintf(stderr, "Cannot open directory \"%s\"\n", directory);
     return -1;
   }
 
   counter->dirs++;
 
-  while ((file_dirent = readdir(dir_handle)) != NULL) {
-    if (file_dirent->d_name[0] == '.') {
-      continue;
+  // Read the directory entries
+  while ((fileDir = readdir(dir)) != NULL) {
+    if (fileDir->d_name[0] == '.') {
+      continue;  // Skip hidden files/directories
     }
 
-    current = malloc(sizeof(entry_t));
-    current->name = strcpy(malloc(strlen(file_dirent->d_name) + 1), file_dirent->d_name);
-    current->is_dir = file_dirent->d_type == DT_DIR;
+    // Create a new entry for the file/directory
+    current = malloc(sizeof(Entry));
+    current->name = strdup(fileDir->d_name);
+    current->isDir = fileDir->d_type == DT_DIR;
     current->next = NULL;
 
-    if (head == NULL) {
-      head = current;
-    } else if (strcmp(current->name, head->name) < 0) {
+    // Insert the entry in sorted order
+    if (head == NULL || strcmp(current->name, head->name) < 0) {
       current->next = head;
       head = current;
     } else {
-      for (iter = head; iter->next && strcmp(current->name, iter->next->name) > 0; iter = iter->next);
-
+      iter = head;
+      while (iter->next && strcmp(current->name, iter->next->name) > 0) {
+        iter = iter->next;
+      }
       current->next = iter->next;
       iter->next = current;
     }
@@ -82,46 +91,46 @@ int walk(const char* directory, const char* prefix, counter_t *counter) {
     size++;
   }
 
-  closedir(dir_handle);
+  closedir(dir);
   if (!head) {
     return 0;
   }
 
-  for (index = 0; index < size; index++) {
+  // Traverse the sorted entries
+  for (size_t index = 0; index < size; index++) {
     if (index == size - 1) {
       pointer = "└── ";
       segment = "    ";
     } else {
       pointer = "├── ";
-      segment = "│   ";
+      segment = "│    ";
     }
 
     printf("%s%s", prefix, pointer);
 
-    struct stat file_stat;
-    char* full_path_name = malloc(strlen(directory) + strlen(head->name) + 2);
-    sprintf(full_path_name, "%s/%s", directory, head->name);
+    struct stat fileStat;
+    char* fullPath = malloc(strlen(directory) + strlen(head->name) + 2);
+    sprintf(fullPath, "%s/%s", directory, head->name);
 
-    if (lstat(full_path_name, &file_stat) != -1) {
-    
-      print_permissions(file_stat.st_mode);
+    if (lstat(fullPath, &fileStat) != -1) {
+      printPermissions(fileStat.st_mode);
       printf(" ");
-      print_user_group(file_stat.st_uid, file_stat.st_gid);
-      printf(" %8ld]", (long) file_stat.st_size);
+      printUserGroup(fileStat.st_uid, fileStat.st_gid);
+      printf(" %8ld]", (long) fileStat.st_size);
       printf("  %s\n", head->name);
 
-      if (head->is_dir) {
-        next_prefix = malloc(strlen(prefix) + strlen(segment) + 1);
-        sprintf(next_prefix, "%s%s", prefix, segment);
+      if (head->isDir) {
+        nextPrefix = malloc(strlen(prefix) + strlen(segment) + 1);
+        sprintf(nextPrefix, "%s%s", prefix, segment);
 
-        walk(full_path_name, next_prefix, counter);
-        free(next_prefix);
+        traverseFiles(fullPath, nextPrefix, counter);
+        free(nextPrefix);
       } else {
         counter->files++;
       }
     }
 
-    free(full_path_name);
+    free(fullPath);
 
     current = head;
     head = head->next;
@@ -134,13 +143,13 @@ int walk(const char* directory, const char* prefix, counter_t *counter) {
 }
 
 int main(int argc, char *argv[]) {
-  char* directory = argc > 1 ? argv[1] : ".";
+  const char* directory = (argc > 1) ? argv[1] : ".";
   printf("%s\n", directory);
 
-  counter_t counter = {0, 0};
-  walk(directory, "", &counter);
+  Counter counter = {0, 0};
+  traverseFiles(directory, "", &counter);
 
   printf("\n%zu directories, %zu files\n",
-    counter.dirs ? counter.dirs - 1 : 0, counter.files);
+         (counter.dirs > 0) ? counter.dirs - 1 : 0, counter.files);
   return 0;
 }
